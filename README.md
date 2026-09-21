@@ -53,6 +53,32 @@ make clean && make up
 
 Это удалит все данные в PostgreSQL.
 
+## Linux / macOS / Windows (WSL2)
+
+`make init` подставляет в `.env` реальные UID/GID текущего пользователя, а
+Dockerfile php пересоздаёт `www-data` с этими же ID (`groupmod`/`usermod -o`,
+флаг `-o` — потому что нужный GID нередко уже занят какой-то системной группой
+в образе, например `dialout`). За счёт этого владелец файлов, которые
+php-fpm пишет в bind mount (`app/vendor` и т.п.), на хосте совпадает с вами,
+а не с root — проверено на Linux, macOS и Windows/WSL2.
+
+- **Linux** — работает «из коробки»: bind mount напрямую транслирует UID/GID
+  между хостом и контейнером.
+- **macOS** (Docker Desktop) — тоже напрямую: virtiofs корректно пробрасывает
+  владельца файлов.
+- **Windows + WSL2** — запускайте `make`/`docker compose` из терминала
+  WSL2-дистрибутива (не из PowerShell/cmd) и держите проект **внутри
+  файловой системы WSL2** (например `~/projects/...`), а не на `/mnt/c/...`.
+  Диски Windows подключены в WSL2 через DrvFs, которая не хранит настоящие
+  Unix-права — владелец файлов там не будет соответствовать UID/GID из
+  `.env`, независимо от настроек Dockerfile. Также проверьте, что в Docker
+  Desktop включена WSL-интеграция для вашего дистрибутива (Settings →
+  Resources → WSL Integration).
+- **Переносы строк** — `.gitattributes` форсирует LF для всех файлов
+  репозитория, чтобы `git clone` на Windows с `core.autocrlf=true` не
+  проставил CRLF в Dockerfile/Makefile/конфигах (это бы сломало их разбор
+  внутри Linux-контейнеров).
+
 ## Структура
 
 ```
