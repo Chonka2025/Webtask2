@@ -1,0 +1,14 @@
+{
+    "name": "devops-course/app",
+    "description": "Учебное приложение: nginx + php-fpm + PostgreSQL",
+    "type": "project",
+    "require": {
+        "php": ">=8.5",
+        "ext-pdo_pgsql": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}
