@@ -1,4 +1,4 @@
-# local_zoo_for_vyatgu
+# WebTrello
 
 Веб-приложение на чистом PHP 8.5 (без фреймворка) с Eloquent, мигратором и
 логированием. Крутится в Docker Compose.
@@ -53,8 +53,7 @@ Health-check: http://127.0.0.1:8080/health.php
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | доступы к БД | `app` / `app` / `app_dev_password` |
 | `UID` / `GID` | владелец файлов в контейнере | текущий пользователь |
 
-\* Если порт занят локальным PostgreSQL — измените `POSTGRES_PORT` (в этом
-проекте используется `5433`).
+\* в этом проекте используется `5433`.
 
 После правки `.env` перезапустите контейнеры: `make down && make up`.
 
@@ -64,11 +63,11 @@ Health-check: http://127.0.0.1:8080/health.php
 ## Приложение
 
 **Eloquent** подключён через `Capsule\Manager` (`app/src/Bootstrap.php`) —
-поэтому фасады Laravel не используются, вместо них — статические вызовы
+фасады Laravel не используются, вместо них — статические вызовы
 `Capsule::schema()` / модель `App\Models\Demo`.
 
 **Миграции** лежат в `app/database/migrations/`, запускаются скриптом
-`app/database/migrate.php` (аналог `artisan migrate`). История хранится в
+`app/database/migrate.php`. История хранится в
 таблице `migrations`. Новая миграция — файл `YYYY_MM_DD_HHMMSS_описание.php`,
 возвращающий анонимный класс `Migration` с методами `up()` / `down()`.
 
@@ -97,11 +96,3 @@ docker/php/         Dockerfile + php.ini + пул php-fpm
 docker/postgres/    Dockerfile + postgresql.conf + init-скрипты
 compose.yaml        оркестрация сервисов
 ```
-
-## Примечания
-
-- Правки кода в `app/` видны сразу (F5) — код смонтирован как volume.
-- Правки конфигов в `docker/` требуют `docker compose restart <сервис>`.
-- `docker/postgres/initdb/*.sql` выполняется **один раз** при инициализации
-  пустого тома. Чтобы применить изменения — `make clean && make up` (данные
-  БД будут удалены).
