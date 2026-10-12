@@ -1,14 +1,26 @@
-# Учебное окружение: nginx + php-fpm + PostgreSQL
+# Учебное окружение: nginx + php-fpm + PostgreSQL + Eloquent
 
-Простой стек для практики Docker Compose: nginx как веб-сервер и
-реверс-прокси к php-fpm 8.5 (чистый PHP, без фреймворков), PostgreSQL 18
-как база данных. Все три образа собираются локально из Dockerfile в `docker/`.
+Стек для практики Docker Compose: nginx как веб-сервер и реверс-прокси к
+php-fpm 8.5, PostgreSQL 18 как база данных. Все три образа собираются локально
+из Dockerfile в `docker/`.
+
+Приложение написано на **чистом PHP без фреймворка**, но использует отдельные
+библиотеки из экосистемы Laravel:
+
+- **Eloquent** (`illuminate/database`) — ORM для работы с БД, подключён через
+  `Capsule\Manager` без ServiceProvider'ов и фасадов.
+- **Мигратор** (`illuminate/database/Migrations`) — управление версиями схемы,
+  аналог `artisan migrate`, запускается своим CLI-скриптом.
+- **Monolog** (`monolog/monolog`) — логирование, в частности каждого входящего
+  HTTP-запроса вместе с телом ответа.
 
 ## Быстрый старт
 
 ```bash
-make init && make up && make composer
+make init && make up && make composer && make migrate
 ```
+
+- `make migrate` применяет миграции схемы (см. раздел «Миграции»).
 
 - `make init` создаёт `.env` из `.env.example` и подставляет в него UID/GID
   текущего пользователя (нужно, чтобы файлы, которые пишет php-контейнер,
@@ -79,12 +91,81 @@ php-fpm пишет в bind mount (`app/vendor` и т.п.), на хосте со�
   проставил CRLF в Dockerfile/Makefile/конфигах (это бы сломало их разбор
   внутри Linux-контейнеров).
 
+## Миграции
+
+Схемой управляет мигратор из `illuminate/database` (аналог `artisan migrate`).
+Файлы миграций лежат в `app/database/migrations/`, применяются командой:
+
+```bash
+make migrate
+```
+
+Скрипт запуска — `app/database/migrate.php`. Он создаёт таблицу `migrations`
+(если её нет), отмечает в ней уже выполненные файлы и запускает новые.
+
+**Что применено:** миграция `2026_10_12_000001_add_updated_at_to_demo_table`
+добавляет в таблицу `demo` колонку `updated_at` — её не хватало Eloquent для
+полноценной работы с таймстампами (саму таблицу `demo` создаёт initdb-скрипт).
+
+Новая миграция — это файл с именем вида `YYYY_MM_DD_HHMMSS_описание.php`,
+который возвращает анонимный класс `Migration` с методами `up()`/`down()`.
+Внутри вместо фасада `Schema` используем `Capsule::schema()` (фасады в
+standalone-приложении без Laravel не работают):
+
+```php
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Capsule::schema()->create('notes', function (Blueprint $table) {
+            $table->id();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Capsule::schema()->dropIfExists('notes');
+    }
+};
+```
+
+## Логирование
+
+Приложение пишет лог через **Monolog** в `app/storage/logs/app.log`
+(это bind mount — файл виден прямо на хосте). Фабрика логгера —
+`app/src/Logger.php`.
+
+`index.php` логирует **каждый входящий HTTP-запрос** вместе с телом ответа.
+Запись `http_request` содержит:
+
+- `request_id` — уникальный id запроса (коррелирует все записи одного запроса);
+- `method`, `uri` — метод и путь;
+- `request_body` — сырое тело запроса;
+- `response_status` — код ответа;
+- `response_body` — тело ответа (собирается через `ob_*`, т.к. HTML выводится
+  напрямую).
+
+Посмотреть лог в реальном времени:
+
+```bash
+docker compose exec php tail -f /var/www/html/storage/logs/app.log
+```
+
 ## Структура
 
 ```
-app/            — код приложения (PSR-4 автозагрузка App\ → src/)
-docker/nginx/   — Dockerfile + конфиг nginx
-docker/php/     — Dockerfile + php.ini + пул php-fpm (www.conf)
-docker/postgres/— Dockerfile + postgresql.conf + init-скрипты
-compose.yaml    — оркестрация; значения по умолчанию — в .env.example
+app/public/           — веб-корень (index.php, health.php)
+app/src/              — код приложения (PSR-4 автозагрузка App\ → src/)
+  Bootstrap.php       — инициализация Eloquent через Capsule
+  Logger.php          — фабрика логгера Monolog
+  Models/Demo.php     — модель Eloquent для таблицы demo
+app/database/
+  migrate.php         — CLI-скрипт запуска миграций
+  migrations/         — файлы миграций схемы
+app/storage/logs/     — сюда пишется app.log (в .gitignore)
+docker/nginx/         — Dockerfile + конфиг nginx
+docker/php/           — Dockerfile + php.ini + пул php-fpm (www.conf)
+docker/postgres/      — Dockerfile + postgresql.conf + init-скрипты
+compose.yaml          — оркестрация; значения по умолчанию — в .env.example
 ```
