@@ -4,42 +4,79 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
-use App\Database;
+use App\Bootstrap;
+use App\Logger;
+use App\Models\Demo;
 
-// Обработка формы добавления записи. Редиректим после POST (Post/Redirect/Get),
-// чтобы повторная отправка формы не происходила при обновлении страницы
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['note'])) {
+// Инициализация Eloquent (Capsule) и логгера
+Bootstrap::db();
+$log = Logger::make();
+
+// --- Контекст входящего HTTP-запроса ---
+$requestId   = bin2hex(random_bytes(8));
+$method      = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$uri         = $_SERVER['REQUEST_URI'] ?? '/';
+// Сырое тело запроса (для application/json и т.п.). Для обычной формы оно
+// будет уже разобрано в $_POST, но для лога полезно видеть именно raw-тело
+$rawBody     = (string) file_get_contents('php://input');
+
+/**
+ * Общая запись лога о запросе. Тело ответа подставляем в $context['response_body'].
+ */
+$logRequest = static function (array $context) use ($log, $requestId, $method, $uri, $rawBody): void {
+    $log->info('http_request', $context + [
+        'request_id'   => $requestId,
+        'method'       => $method,
+        'uri'          => $uri,
+        'request_body' => $rawBody,
+    ]);
+};
+
+// --- Обработка POST: добавление записи (через Eloquent) ---
+if ($method === 'POST' && isset($_POST['note'])) {
     try {
-        $pdo = Database::connect();
-        $stmt = $pdo->prepare('INSERT INTO demo (note) VALUES (:note)');
-        $stmt->execute(['note' => (string) $_POST['note']]);
+        Demo::create(['note' => (string) $_POST['note']]);
+        $log->info('note_created', ['request_id' => $requestId, 'note' => (string) $_POST['note']]);
     } catch (\Throwable $e) {
-        // Ошибка подключения/записи — статус БД и так будет виден на странице ниже
+        $log->error('note_create_failed', ['request_id' => $requestId, 'error' => $e->getMessage()]);
     }
+
+    // Post/Redirect/Get: тела ответа здесь физически нет, логируем только статус
+    $logRequest([
+        'response_status' => 302,
+        'response_body'   => '(redirect to /)',
+    ]);
+
     header('Location: /');
     exit;
 }
 
-$phpVersion = PHP_VERSION;
+// --- Чтение данных через Eloquent ---
+$phpVersion  = PHP_VERSION;
 $hasPdoPgsql = extension_loaded('pdo_pgsql');
-$hostname = gethostname();
+$hostname    = gethostname();
 
 $dbVersion = null;
-$dbError = null;
-$rows = [];
+$dbError   = null;
+$notes     = [];
 
 try {
-    $pdo = Database::connect();
-    $dbVersion = (string) $pdo->query('SELECT version()')->fetchColumn();
-    $rows = $pdo->query('SELECT id, created_at, note FROM demo ORDER BY id DESC')->fetchAll();
+    $capsule = Bootstrap::db();
+    // В Query Builder Eloquent нет fetchColumn() — берём одно значение через scalar()
+    $dbVersion = (string) $capsule->getConnection()->selectOne('SELECT version()')->version;
+    $notes = Demo::orderByDesc('id')->get();
 } catch (\Throwable $e) {
     $dbError = $e->getMessage();
+    $log->error('db_read_failed', ['request_id' => $requestId, 'error' => $dbError]);
 }
 
 function h(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
+
+// --- Весь HTML собираем в буфер, чтобы залогировать тело ответа ---
+ob_start();
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -85,14 +122,14 @@ function h(string $value): string
     </dl>
 
     <h2>Таблица demo</h2>
-    <?php if ($rows): ?>
+    <?php if ($notes->isNotEmpty()): ?>
         <table>
             <tr><th>id</th><th>создано</th><th>note</th></tr>
-            <?php foreach ($rows as $row): ?>
+            <?php foreach ($notes as $note): ?>
                 <tr>
-                    <td><?= h((string) $row['id']) ?></td>
-                    <td><?= h((string) $row['created_at']) ?></td>
-                    <td><?= h((string) $row['note']) ?></td>
+                    <td><?= h((string) $note->id) ?></td>
+                    <td><?= h((string) $note->created_at) ?></td>
+                    <td><?= h((string) $note->note) ?></td>
                 </tr>
             <?php endforeach; ?>
         </table>
@@ -106,3 +143,12 @@ function h(string $value): string
     </form>
 </body>
 </html>
+<?php
+// Достаём сгенерированный HTML из буфера, отдаём клиенту и логируем
+$responseBody = (string) ob_get_clean();
+echo $responseBody;
+
+$logRequest([
+    'response_status' => http_response_code(),
+    'response_body'   => $responseBody,
+]);
