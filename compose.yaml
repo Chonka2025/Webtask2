@@ -40,6 +40,9 @@ services:
       DB_NAME: ${POSTGRES_DB}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Активное окружение конфига и ключ шифрования (см. app/src/Config, app/src/Crypto)
+      APP_ENV: ${APP_ENV:-dev}
+      APP_CIPHER_KEY: ${APP_CIPHER_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
