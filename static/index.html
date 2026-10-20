@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Секундомер</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="stopwatch">
+        <h1>Секундомер</h1>
+
+        <!-- Время разбито на сегменты, чтобы секунды были крупнее, а сотые — мельче -->
+        <div class="time" id="time" aria-live="polite" aria-label="Текущее время">
+            <span id="minutes">00</span><span class="sep">:</span><span id="seconds">00</span><span class="sep">.</span><span class="centis" id="centis">00</span>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn start">Старт</button>
+            <button id="pauseBtn" class="btn pause" disabled>Пауза</button>
+            <button id="resetBtn" class="btn reset" disabled>Сброс</button>
+        </div>
+
+        <p class="hint">«Старт» запускает отсчёт, «Пауза» останавливает, «Сброс» обнуляет время.</p>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
