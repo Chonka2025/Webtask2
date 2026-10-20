@@ -6,7 +6,11 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use App\Bootstrap;
 use App\Logger;
+use App\Models\Board;
+use App\Models\BoardColumn;
+use App\Models\Card;
 use App\Models\Demo;
+use App\Models\User;
 
 // Инициализация Eloquent (Capsule) и логгера
 Bootstrap::db();
@@ -59,12 +63,34 @@ $hostname    = gethostname();
 $dbVersion = null;
 $dbError   = null;
 $notes     = [];
+$tables    = [];   // ['users' => ['label' => ..., 'count' => ...], ...]
+$schema    = [];   // ['users' => ['user_id', 'email', ...], ...]
 
 try {
     $capsule = Bootstrap::db();
     // В Query Builder Eloquent нет fetchColumn() — берём одно значение через scalar()
     $dbVersion = (string) $capsule->getConnection()->selectOne('SELECT version()')->version;
     $notes = Demo::orderByDesc('id')->get();
+
+    // 4 таблицы приложения: количество записей через Eloquent-модели
+    $tables = [
+        'users'         => ['label' => 'Пользователи', 'count' => User::count()],
+        'boards'        => ['label' => 'Доски',        'count' => Board::count()],
+        'board_columns' => ['label' => 'Колонки',      'count' => BoardColumn::count()],
+        'cards'         => ['label' => 'Карточки',     'count' => Card::count()],
+    ];
+
+    // Реальная структура таблиц — из каталога information_schema
+    $colRows = $capsule->getConnection()->select(
+        "SELECT table_name, column_name
+           FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name IN ('users','boards','board_columns','cards')
+          ORDER BY table_name, ordinal_position"
+    );
+    foreach ($colRows as $row) {
+        $schema[$row->table_name][] = $row->column_name;
+    }
 } catch (\Throwable $e) {
     $dbError = $e->getMessage();
     $log->error('db_read_failed', ['request_id' => $requestId, 'error' => $dbError]);
@@ -103,6 +129,11 @@ ob_start();
     </style>
 </head>
 <body>
+    <nav style="margin-bottom:1rem;">
+        <a href="index.php">Главная</a>
+        <a href="boards.php">Доски (CRUD)</a>
+    </nav>
+
     <h1>nginx + php-fpm + PostgreSQL</h1>
 
     <dl>
@@ -120,6 +151,31 @@ ob_start();
             <?= $dbError === null ? h($dbVersion ?? '') : 'ошибка: ' . h($dbError) ?>
         </dd>
     </dl>
+
+    <h2>Схема приложения — 4 таблицы</h2>
+    <?php if ($dbError === null): ?>
+        <table>
+            <tr><th>Таблица</th><th>Назначение</th><th>Записей</th><th>Колонки</th></tr>
+            <?php foreach ($tables as $name => $info): ?>
+                <tr>
+                    <td><code><?= h($name) ?></code></td>
+                    <td><?= h($info['label']) ?></td>
+                    <td><?= (int) $info['count'] ?></td>
+                    <td><?= h(implode(', ', $schema[$name] ?? [])) ?></td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
+
+        <p style="font-size:.9rem; color:#555;">
+            <strong>Связи:</strong>
+            <code>boards.owner_user_id → users.user_id</code> ·
+            <code>board_columns.board_id → boards.board_id</code> ·
+            <code>cards.board_id → boards.board_id</code> ·
+            <code>cards.column_id → board_columns.column_id</code>
+        </p>
+    <?php else: ?>
+        <p class="fail">Не удалось прочитать схему: <?= h($dbError) ?></p>
+    <?php endif; ?>
 
     <h2>Таблица demo</h2>
     <?php if ($notes->isNotEmpty()): ?>
